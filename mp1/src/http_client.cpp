@@ -77,15 +77,25 @@ int main(int argc, char *argv[])
 	printf("client: connecting to %s\n", s);
 
 	freeaddrinfo(servinfo); // all done with this structure
+	char mockHttp[] = "This is mock http request";
 
-	if ((numbytes = recv(sockfd, buf, MAXDATASIZE-1, 0)) == -1) {
-	    perror("recv");
-	    exit(1);
+
+	if (send(sockfd, mockHttp, 25, 0) == -1) {
+		perror("send");
+		exit(1);
 	}
 
-	buf[numbytes] = '\0';
+	while(1) {
+		if ((numbytes = recv(sockfd, buf, MAXDATASIZE-1, 0)) == -1) {
+	    	perror("recv");
+	    	// exit(1);
+			continue;
+		}
+		buf[numbytes] = '\0';
+		printf("client: received '%s'\n",buf);
+		break;
+	}
 
-	printf("client: received '%s'\n",buf);
 
 	close(sockfd);
 

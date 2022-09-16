@@ -13,10 +13,13 @@
 #include <sys/socket.h>
 
 #include <arpa/inet.h>
+#include <string>
 
 #define PORT "3490" // the port client will be connecting to 
 
-#define MAXDATASIZE 100 // max number of bytes we can get at once 
+#define MAXDATASIZE 1000 // max number of bytes we can get at once 
+
+using namespace std;
 
 // get sockaddr, IPv4 or IPv6:
 void *get_in_addr(struct sockaddr *sa)
@@ -35,17 +38,36 @@ int main(int argc, char *argv[])
 	struct addrinfo hints, *servinfo, *p;
 	int rv;
 	char s[INET6_ADDRSTRLEN];
+	string url, protocol, host, port, file;
+	size_t protocolEnd, hostEnd, portEnd;
 
 	if (argc != 2) {
 	    fprintf(stderr,"usage: client hostname\n");
 	    exit(1);
 	}
 
+	url = argv[1];
+	protocolEnd = url.find("://");
+	protocol = url.substr(0, protocolEnd);
+	hostEnd = url.find(":", protocolEnd+3);
+	if (hostEnd != string::npos) {
+		host = url.substr(protocolEnd+3, hostEnd - (protocolEnd+3));
+		portEnd = url.find("/", hostEnd+1);
+		port = url.substr(hostEnd+1, portEnd - (hostEnd+1));
+	} else {
+		hostEnd = url.find("/", protocolEnd+3);
+		host = url.substr(protocolEnd+3, hostEnd - (protocolEnd+3));
+		portEnd = hostEnd;
+		port= "80";
+	}
+	// file path should start with /
+	file = url.substr(portEnd, url.size());
+
 	memset(&hints, 0, sizeof hints);
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
 
-	if ((rv = getaddrinfo(argv[1], PORT, &hints, &servinfo)) != 0) {
+	if ((rv = getaddrinfo(host.c_str(), PORT, &hints, &servinfo)) != 0) {
 		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
 		return 1;
 	}
@@ -77,10 +99,14 @@ int main(int argc, char *argv[])
 	printf("client: connecting to %s\n", s);
 
 	freeaddrinfo(servinfo); // all done with this structure
-	char mockHttp[] = "This is mock http request";
 
+	string httpRequest = "";
+	httpRequest.append("GET ").append(file).append(" HTTP/1.1\r\n")
+		.append("User-Agent: Wget/1.12 (linux-gnu)\r\n")
+		.append("Host: ").append(host).append(":").append(port).append("\r\n")
+		.append("Connection: Keep-Alive\r\n\r\n");
 
-	if (send(sockfd, mockHttp, 25, 0) == -1) {
+	if ((numbytes = send(sockfd, httpRequest.c_str(), httpRequest.size(), 0)) == -1) {
 		perror("send");
 		exit(1);
 	}

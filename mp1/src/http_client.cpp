@@ -18,7 +18,7 @@
 
 // #define PORT "3490" // the port client will be connecting to 
 
-#define MAXDATASIZE 100000 // max number of bytes we can get at once 
+#define MAXDATASIZE 10000000 // max number of bytes we can get at once 
 
 using namespace std;
 

@@ -119,11 +119,21 @@ int main(int argc, char *argv[])
 			continue;
 		}
 		buf[numbytes] = '\0';
-		// printf("client: received '%s'\n",buf);
+		string received = buf;
+		size_t headerEnd = received.find("\r\n\r\n");
+		string header, document;
+		if(headerEnd != string::npos) {
+			header = received.substr(0, headerEnd);
+			document = received.substr(headerEnd+4, received.size()-header.size()-4);
+		} else {
+			header = buf;
+			document = "";
+		}
+		printf("client: received:\n '%s'\n",header.c_str());
 		ofstream output;
 		output.open("output");
 		if(output.is_open()) {
-			output << buf;
+			output << document;
 			output.close();			
 		} else {
 			perror("cannot open output");

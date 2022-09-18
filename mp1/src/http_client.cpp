@@ -18,7 +18,7 @@
 
 // #define PORT "3490" // the port client will be connecting to 
 
-#define MAXDATASIZE 10000000 // max number of bytes we can get at once 
+#define MAXDATASIZE 1000 // max number of bytes we can get at once 
 
 using namespace std;
 
@@ -111,7 +111,9 @@ int main(int argc, char *argv[])
 		perror("send");
 		exit(1);
 	}
-
+	ofstream output;
+	output.open("output");
+	bool isHead = true;
 	while(1) {
 		if ((numbytes = recv(sockfd, buf, MAXDATASIZE-1, 0)) == -1) {
 	    	perror("recv");
@@ -119,29 +121,23 @@ int main(int argc, char *argv[])
 			continue;
 		}
 		buf[numbytes] = '\0';
-		string received = buf;
-		size_t headerEnd = received.find("\r\n\r\n");
-		string header, document;
-		if(headerEnd != string::npos) {
+		if (numbytes == 0) {
+			output.close();
+			break;
+		}
+		if (isHead) {
+			string received = buf;
+			string header, document;
+			size_t headerEnd = received.find("\r\n\r\n");
 			header = received.substr(0, headerEnd);
+			isHead = false;
+			printf("client: received:\n '%s'\n",header.c_str());
 			document = received.substr(headerEnd+4, received.size()-header.size()-4);
-		} else {
-			header = buf;
-			document = "";
-		}
-		printf("client: received:\n '%s'\n",header.c_str());
-		ofstream output;
-		output.open("output");
-		if(output.is_open()) {
 			output << document;
-			output.close();			
-		} else {
-			perror("cannot open output");
+		} else {		
+			output << buf;
 		}
-		break;
 	}
-
-
 	close(sockfd);
 
 	return 0;

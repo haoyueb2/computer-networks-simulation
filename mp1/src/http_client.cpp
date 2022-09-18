@@ -14,8 +14,9 @@
 
 #include <arpa/inet.h>
 #include <string>
+#include <fstream>
 
-#define PORT "3490" // the port client will be connecting to 
+// #define PORT "3490" // the port client will be connecting to 
 
 #define MAXDATASIZE 1000 // max number of bytes we can get at once 
 
@@ -67,7 +68,7 @@ int main(int argc, char *argv[])
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
 
-	if ((rv = getaddrinfo(host.c_str(), PORT, &hints, &servinfo)) != 0) {
+	if ((rv = getaddrinfo(host.c_str(), port.c_str(), &hints, &servinfo)) != 0) {
 		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
 		return 1;
 	}
@@ -118,7 +119,15 @@ int main(int argc, char *argv[])
 			continue;
 		}
 		buf[numbytes] = '\0';
-		printf("client: received '%s'\n",buf);
+		// printf("client: received '%s'\n",buf);
+		ofstream output;
+		output.open("output");
+		if(output.is_open()) {
+			output << buf;
+			output.close();			
+		} else {
+			perror("cannot open output");
+		}
 		break;
 	}
 

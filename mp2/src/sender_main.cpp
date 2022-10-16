@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <vector>
 #include <cmath>
+#include <stdio.h>
 
 #include <unistd.h>
 #include <sys/types.h>

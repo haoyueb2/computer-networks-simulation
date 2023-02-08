@@ -89,6 +89,7 @@ void reliablyReceive(unsigned short int myUDPport, char* destinationFile) {
             diep("recvfrom");
         }
         if (p->type == FIN) {
+            cout << "Received FIN" << endl;
             sendAck(0, FINACK);
             cout << "connection close" << endl;
             break;

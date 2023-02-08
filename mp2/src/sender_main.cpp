@@ -16,11 +16,10 @@
 #include <unistd.h>
 #include <fcntl.h>
 using namespace std;
-// To Do: Synchronize MSS
 #define MaxSegmentSize 2000
 #define NUM_THREADS 3
 // #define DefaultSsthreshByte 65535
-#define RTO 40000
+#define RTO 4000000
 enum PacketType { DATA,
     ACK,
     FIN,
@@ -36,10 +35,10 @@ typedef uint64_t time_dur;
 
 typedef struct DataSegment {
     unsigned long long int seqNum;
-    time_dur sendTime;
     int length;
     int type;
     char data[MaxSegmentSize];
+    time_dur sendTime;
 } DataSegment;
 
 typedef vector<DataSegment*> PacketData;
@@ -51,17 +50,16 @@ uint64_t getCurrTime() {
 
 typedef struct TcpInfo {
     tcp_int sendBase = 0;
-    tcp_int maxSentSeqNum = 0;
+    tcp_int maxSentSeqNum = -1;
     double cwnd = 1.0;
     double ssthresh = 64;
-    // double ssthresh = 64;
     int dupAckCount = 0;
     TcpState currTcpState = SLOW_START;
     PacketData packets;
     int sockfd;
     tcp_int byteToRead = 0;
     char* fileName;
-    bool finished;
+    bool finished = false;
     queue<DataSegment*> senderQueue;
     pthread_mutex_t readMutex;
     pthread_mutex_t sendMutex;
@@ -91,6 +89,7 @@ void* readFile(void* info)
         tcpInfo->packets.push_back(segment);
         pthread_mutex_unlock(&tcpInfo->readMutex);
     }
+    return NULL;
 }
 
 void* sendPackets(void* info) {
@@ -109,21 +108,30 @@ void* sendPackets(void* info) {
             }
         }
     }
+    return NULL;
 }
 
+void deleteAllPackets(TcpInfo* info) {
+    PacketData packets = info->packets;
+    for (tcp_int curr_seq = 0; curr_seq < packets.size(); curr_seq++) {
+        delete packets[curr_seq];
+    }
+}
 
 
 void initializeThreads(TcpInfo* info) {
     pthread_mutex_t readMutex;
     info->readMutex = readMutex;
+    pthread_mutex_init(&info->readMutex, NULL);
     pthread_mutex_t sendMutex;
     info->sendMutex = sendMutex;
+    pthread_mutex_init(&info->sendMutex, NULL);
     pthread_t  sendThread, readThread;
     info->threads.push_back(sendThread);
     info->threads.push_back(readThread);
-    pthread_create(&readThread, NULL, readFile, info);
-    sleep(5);
-    pthread_create(&sendThread, NULL, sendPackets, info);
+    pthread_create(&info->threads[1], NULL, readFile, info);
+    sleep(2);
+    pthread_create(&info->threads[0], NULL, sendPackets, info);
 }
 // void readByteFromFile(TcpInfo* info, tcp_int seq_num) {
 //     if (seq_num < info->packets.size()) {
@@ -198,7 +206,7 @@ int connect(char* hostname, unsigned short int hostUDPport)
 // Send all packets with seq_num in the range of [start_seq, end_seq)
 int sendPacketInRange(TcpInfo* info, tcp_int start_seq, tcp_int end_seq)
 {
-    while (end_seq >= info->packets.size()) {
+    while (end_seq > info->packets.size()) {
         sleep(1);
     }
     PacketData packets = info->packets;
@@ -218,7 +226,10 @@ int sendPacketInRange(TcpInfo* info, tcp_int start_seq, tcp_int end_seq)
 bool checkAndHandleTimeout(TcpInfo* info)
 {
     if (getCurrTime() - (info->packets[info->sendBase])->sendTime > RTO) {
+        cout << "#########################" << endl;
         cout << "Found Time out" << endl;
+        cout << "time out current time: " << getCurrTime() << endl;
+        cout << "send Base send time: " << info->packets[info->sendBase]->sendTime << endl;
         info->ssthresh = info->cwnd / 2.0;
         info->cwnd = 1;
         info->dupAckCount = 0;
@@ -231,26 +242,11 @@ bool checkAndHandleTimeout(TcpInfo* info)
     return false;
 }
 
-// Delete all acked packets, and set sendBase to the ack_num
-void handleAckedPacket(TcpInfo* info, tcp_int ack_num)
-{
-    // If no new packet is acked by the new ack num, do nothing.
-    if (ack_num - info->sendBase <= 0) {
-        return;
-    }
-    PacketData packets = info->packets;
-    for (tcp_int curr_seq = info->sendBase; curr_seq < ack_num; curr_seq++) {
-        delete packets[curr_seq];
-    }
-    info->sendBase = ack_num;
-}
-
 // Update cwnd, ssthresh, currTcpState based on the ack_num, and handle the case when the ack_num = 3
 void controlCongretion(TcpInfo* info, tcp_int ack_num)
 {
     tcp_int num_pkt_acked = ack_num - info->sendBase;
     if (num_pkt_acked > 0) {
-        info->timer = getCurrTime();
         info->dupAckCount = 0;
     } else if (num_pkt_acked == 0) {
         info->dupAckCount++;
@@ -288,31 +284,35 @@ void waitAndCloseThreads(TcpInfo* info) {
     pthread_mutex_destroy(&info->sendMutex);
 }
 
+void setTimerForSentPackets(TcpInfo* info, tcp_int start_seq, tcp_int end_seq) {
+    for (tcp_int i = start_seq; i < end_seq; i++) {
+        info->packets[i]->sendTime = getCurrTime();
+    }
+}
+
 void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* filename, tcp_int bytesToTransfer)
 {
     TcpInfo* info = new TcpInfo();
-    initializeThreads(info);
     info->sockfd = connect(hostname, hostUDPport);
     info->fileName = filename;
     info->byteToRead = bytesToTransfer;
+    initializeThreads(info);
     cout << "byte to Read: " << info->byteToRead << endl;
     if (info->sockfd == -1) {
         perror("Create Socket Failed");
         exit(1);
     }
     tcp_int num_packet = ceil((double) bytesToTransfer / MaxSegmentSize);
+    cout << "Num Packets: " << num_packet << endl;
     int pktSent = min((tcp_int) info->cwnd, num_packet);
     if (sendPacketInRange(info, 0, pktSent) == -1) {
         perror("Send Packet Failed");
         exit(1);
     }
     info->maxSentSeqNum = pktSent - 1;
+    setTimerForSentPackets(info, 0, pktSent);
     char buffer[sizeof(DataSegment)];
     while (info->sendBase != num_packet) {
-        cout << "curr window: " << info->sendBase << " " << info->sendBase+info->cwnd << endl;
-        cout << "window size: " << info->cwnd << endl;
-        cout << "Max Sent Seq Num: "<< info->maxSentSeqNum << endl;
-        cout << "current state and dupackcount: " << info->currTcpState << " " << info->dupAckCount << endl;
         if (recv(info->sockfd, buffer, sizeof(DataSegment), 0) == -1) {
             if (errno == EWOULDBLOCK || errno == EAGAIN) {
                 checkAndHandleTimeout(info);
@@ -320,6 +320,11 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
                 cout << "Socket Time out Error" << endl;
             }
         } else {
+            cout << "#########################" << endl;
+            cout << "curr window: " << info->sendBase << " " << info->sendBase+info->cwnd << endl;
+            cout << "window size: " << info->cwnd << endl;
+            cout << "Max Sent Seq Num: "<< info->maxSentSeqNum << endl;
+            cout << "current state and dupackcount: " << info->currTcpState << " " << info->dupAckCount << endl;
             if (checkAndHandleTimeout(info)) {
                 cout << "Time out when received packets" << endl;
                 continue;
@@ -329,20 +334,21 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
             tcp_int ack_num = segment.seqNum;
             cout << "ack_num " << ack_num << endl;
             controlCongretion(info, ack_num);
-            handleAckedPacket(info, ack_num);
+            if (ack_num - info->sendBase > 0) {
+                info->sendBase = ack_num;
+            }
             // Send more segments if allowed by cwnd
-            tcp_int numPacketToSend = info->sendBase + floor(info->cwnd) - 1 - info->maxSentSeqNum;
+            tcp_int numPacketToSend = info->sendBase + ceil(info->cwnd) - 1 - info->maxSentSeqNum;
             if (numPacketToSend > 0) {
                 tcp_int endingSeqNum = min(info->maxSentSeqNum + numPacketToSend + 1, num_packet);
                 sendPacketInRange(info, info->maxSentSeqNum+1, endingSeqNum);
-                for (tcp_int i = info->maxSentSeqNum+1; i < endingSeqNum; i++) {
-                    info->packets[i]->sendTime = getCurrTime();
-                }
+                setTimerForSentPackets(info, info->maxSentSeqNum+1, endingSeqNum);
                 info->maxSentSeqNum = endingSeqNum - 1;
             }
         }
     }
-
+    cout << "Done sending all packets" << endl;
+    deleteAllPackets(info);
     // Send Fin to the other side and wait for FinAck after sending all segments.
     DataSegment segment;
     segment.type = FIN;
@@ -352,15 +358,24 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
         perror("Failed to send FIN packet");
         exit(1);
     }
+    time_dur finSentTime = getCurrTime();
     while (true) {
+        if (getCurrTime() - finSentTime > RTO) {
+            cout << "FIN Time out" << endl;
+            send(info->sockfd, buffer, sizeof(DataSegment), 0);
+            finSentTime = getCurrTime();
+        }
         if (recv(info->sockfd, buffer, sizeof(DataSegment), 0) != -1) {
             cout << "received packet for Fin" << endl;
             DataSegment ack_segment;
             memcpy(&ack_segment, buffer, sizeof(DataSegment));
             if (ack_segment.type == FINACK) {
-                cout << "Finished TCP Connection" << endl;
+                cout << "received FINACK" << endl;
                 waitAndCloseThreads(info);
+                cout << "Close TCP connection" << endl;
                 return;
+            } else {
+                cout << "Didn't receive FINACK, instead get " << ack_segment.type << endl;
             }
         } else {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
